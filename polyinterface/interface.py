@@ -1,3 +1,30 @@
+import json
+import base64
+import os
+import warnings
+from copy import deepcopy
+import ssl
+import logging
+import markdown2
+import os
+from os.path import join, expanduser
+import paho.mqtt.client as mqtt
+try:
+    import queue
+except ImportError:
+    import Queue as queue
+import re
+import sys
+import select
+import random
+import string
+from threading import Thread, current_thread
+import time
+import netifaces
+from .polylogger import LOGGER
+
+DEBUG = False
+
 class Interface(object):
 
     CUSTOM_CONFIG_DOCS_FILE_NAME = 'POLYGLOT_CONFIG.md'
@@ -43,6 +70,7 @@ class Interface(object):
         self._mqttc.on_publish = self._publish
         self._mqttc.on_log = self._log
         self.useSecure = True
+        self._nodes = {}
         self.custom = {}
         if self.pg3init['secure'] is 1:
             self.sslContext = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
@@ -56,13 +84,14 @@ class Interface(object):
         self.polyglotConnected = False
         self.__configObservers = []
         self.__stopObservers = []
+        self.__startObservers = []
         self.__deleteObservers = []
         self.__pollObservers = []
         Interface.__exists = True
         self.custom_params_docs_file_sent = False
         self.custom_params_pending_docs = ''
         try:
-            self.network_interface = self.get_network_interface()
+            self.network_interface = self.getNetworkInterface()
             LOGGER.info('Connect: Network Interface: {}'.format(
                 self.network_interface))
         except:
@@ -70,7 +99,7 @@ class Interface(object):
             LOGGER.error(
                 'Failed to determine Network Interface', exc_info=True)
         self._nodeClasses = {}
-        self._nodeClasses = dict([(name, cls) for name, cls in __dict__.items() if isinstance(cls, type)])
+        self._nodeClasses = dict([(name, cls) for name, cls in self.__dict__.items() if isinstance(cls, type)])
         LOGGER.info('Found classes: {}'.format(self._nodeClasses))
 
     def onConfig(self, callback):
@@ -78,6 +107,13 @@ class Interface(object):
         Gives the ability to bind any methods to be run when the config is received.
         """
         self.__configObservers.append(callback)
+
+    def onStart(self, callback):
+        """
+        Gives the ability to bind any methods to be run when the interface is
+        started.
+        """
+        self.__startObservers.append(callback)
 
     def onStop(self, callback):
         """
@@ -189,6 +225,8 @@ class Interface(object):
                                     'key')] = custom.get('value')
                     if self.config is None:
                         self.send({'config': {}}, 'system')
+                elif key == 'installprofile':
+                    LOGGER.debug('Profile installation finished')
                 elif key in inputCmds:
                     self.inQueue.put(parsed_msg)
                 else:
@@ -203,6 +241,7 @@ class Interface(object):
             message = template.format(type(ex).__name__, ex.args)
             LOGGER.error("MQTT Received Unknown Error: " +
                          message, exc_info=True)
+
 
     def _disconnect(self, mqttc, userdata, rc):
         """
@@ -322,7 +361,7 @@ class Interface(object):
             LOGGER.exception(
                 'KeyError in stop: {}'.format(e), exc_info=True)
 
-    def _send(self, message, type):
+    def send(self, message, type):
         """
         Formatted Message to send to Polyglot. Connection messages are sent automatically from this module
         so this method is used to send commands to/from Polyglot and formats it for consumption
@@ -358,31 +397,32 @@ class Interface(object):
         received.
         """
         # if this is the first time called set isInitialConfig to true
-        isInitialConfig = !self.config
+        isInitialConfig = self.config != None
 
         self.config = config
 
-        for n in config['newNodes']:
-            address = n.address.slice(5)
+        if 'newNodes' in config:
+            for n in config['newNodes']:
+                address = n.address.slice(5)
 
-            node = {}
+                node = {}
 
-            # if this node doesn't exist yet, create it
-            if address not in self._nodes[address]:
-                nodeClass = self._nodeClasses[n.nodedef]
-                primary = n.primary.slice(5)
+                # if this node doesn't exist yet, create it
+                if address not in self._nodes[address]:
+                    nodeClass = self._nodeClasses[n.nodedef]
+                    primary = n.primary.slice(5)
 
-                if nodeClass:
-                    node = new nodeClass(self, primary, address, n.name)
-                    self._nodes[address] = node
+                    if nodeClass:
+                        node = nodeClass(self, primary, address, n.name)
+                        self._nodes[address] = node
+                    else:
+                        LOGGER.error('Config node with address {} has invalid class {}'.format(address, n.nodedef))
                 else:
-                    LOGGER.error('Config node with address {} has invalid class {}'.format(address, n.nodedef))
-            else:
-                node = self._nodes[address]
+                    node = self._nodes[address]
 
-            if node:
-                for prop in n:
-                    node[prop] = n[prop]
+                if node:
+                    for prop in n:
+                        node[prop] = n[prop]
 
 
         # TODO: Is this where we want newParamsDetected?  Or does that
@@ -409,9 +449,9 @@ class Interface(object):
 
     def _handleInput(self, key, item):
         if key == 'command':
-            if item['address'] in self.nodes:
+            if item['address'] in self._nodes:
                 try:
-                    self.nodes[item['address']].runCmd(item)
+                    self._nodes[item['address']].runCmd(item)
                 except (Exception) as err:
                     LOGGER.error('_parseInput: failed {}.runCmd({}) {}'.format(
                         item['address'], item['cmd'], err), exc_info=True)
@@ -442,29 +482,26 @@ class Interface(object):
             except KeyError as e:
                 LOGGER.error('KeyError in longPoll: {}'.format(e), exc_info=True)
         elif key == 'query':
-            if item['address'] in self.nodes:
-                self.nodes[item['address']].query()
+            if item['address'] in self._nodes:
+                self._nodes[item['address']].query()
             elif item['address'] == 'all':
                 # TODO: FIXME: This isn't right now
                 self.query()
         elif key == 'status':
-            if item['address'] in self.nodes:
-                self.nodes[item['address']].status()
+            if item['address'] in self._nodes:
+                self._nodes[item['address']].status()
             elif item['address'] == 'all':
                 # TODO: FIXME: This isn't right now
                 self.status()
 
     def _handleResult(self, result):
-        # LOGGER.debug(self.nodesAdding)
+        LOGGER.debug('handle results: {}'.format(result))
         try:
             if result.get('address'):
-                if not result.get('address') == self.address:
-                    self.nodes.get(result.get('address')).start()
-                # self.nodes[result['addnode']['address']].reportDrivers()
-                if result.get('address') in self.nodesAdding:
-                    self.nodesAdding.remove(result.get('address'))
+                # Call node's start function
+                self._nodes.get(result.get('address')).start()
             else:
-                del self.nodes[result.get('address')]
+                del self._nodes[result.get('address')]
         except (KeyError, ValueError) as err:
             LOGGER.error('handleResult: {}'.format(err), exc_info=True)
 
@@ -478,6 +515,13 @@ class Interface(object):
             thread.start()
 
         self._get_server_data()
+
+        try:
+            for watcher in self.__startObservers:
+                watcher()
+        except KeyError as e:
+            LOGGER.exception(
+                'KeyError in start: {}'.format(e), exc_info=True)
 
     def isConnected(self):
         """ Tells you if this nodeserver and Polyglot are connected via MQTT """
@@ -501,6 +545,7 @@ class Interface(object):
             }]
         }
         self.send(message, 'command')
+        self._nodes[node.address] = node
 
     def getConfig(self):
         """ Returns a copy of the last config received. """
@@ -543,7 +588,7 @@ class Interface(object):
         }
         self.send(message, 'command')
 
-    def updateProfile(sefl):
+    def updateProfile(self):
         """ Sends the latest profile files to the ISY """
         LOGGER.info('Sending Install Profile command to Polyglot.')
         message = {'installprofile': {'reboot': False}}
@@ -713,8 +758,24 @@ class Interface(object):
         self._saveCustom('customparamsdoc')
 
     def getNetworkInterface(self, interface='default'):
-        return get_network_interface(interface=interface)
+        """
+        Returns the network interface which contains addr, broadcasts, and netmask elements
 
+        :param interface: The interface name to check, default grabs
+        """
+        # Get the default gateway
+        gws = netifaces.gateways()
+        LOGGER.debug("gws: {}".format(gws))
+        rt = False
+        if interface in gws:
+            gwd = gws[interface][netifaces.AF_INET]
+            LOGGER.debug("gw: {}={}".format(interface, gwd))
+            ifad = netifaces.ifaddresses(gwd[1])
+            rt = ifad[netifaces.AF_INET]
+            LOGGER.debug("ifad: {}={}".format(gwd[1], rt))
+            return rt[0]
+        LOGGER.error("No {} in gateways:{}".format(interface, gws))
+        return {'addr': False, 'broadcast': False, 'netmask': False}
 
     def checkProfile(self, force=False, build_profile=None):
         """
@@ -768,3 +829,6 @@ class Interface(object):
     def supports_feature(self, feature):
         LOGGER.warning('The supports_feature() function is deprecated.')
         return True
+
+    def runForever(self):
+        self._threads['input'].join()

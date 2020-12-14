@@ -29,8 +29,8 @@ from threading import Thread, current_thread
 import time
 import netifaces
 from .polylogger import LOGGER
-import .interface
-import .node
+from .interface import Interface
+from .node import Node
 
 DEBUG = False
 PY2 = sys.version_info[0] == 2

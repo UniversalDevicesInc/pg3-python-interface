@@ -70,6 +70,7 @@ class Node(object):
                         'value': str(driver['value']),
                         'uom': driver['uom']
                     }]
+                }
                 self.poly.send(message, 'status')
                 drivers[driver]['changed'] = False
 
@@ -108,8 +109,8 @@ class Node(object):
 
     def runCmd(self, command):
         """ Execute the function attached to the command """
-        if command['command'] in self.commands:
-            fun = self.commands[command['command']]
+        if command['cmd'] in self.commands:
+            fun = self.commands[command['cmd']]
             fun(self, command)
 
     def start(self):
