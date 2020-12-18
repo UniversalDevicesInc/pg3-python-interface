@@ -153,7 +153,7 @@ class Interface(object):
             self.pg3init = json.loads(
                 base64.b64decode(os.environ.get('PG3INIT')))
         except:
-            LOGGER.error('Failed to parse init. Exiting...')
+            LOGGER.error('Failed to parse init. Exiting...',exc_info=True)
             sys.exit(1)
         self.config = None
         self.connected = False
