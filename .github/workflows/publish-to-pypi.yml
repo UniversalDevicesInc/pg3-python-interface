@@ -1,0 +1,70 @@
+name: Publish PyPI and TestPyPI
+
+on: push
+
+jobs:
+  build-n-publish:
+    name: Build and publish to PyPI and TestPyPI
+    runs-on: ubuntu-18.04
+
+    steps:
+    - name: Notify Start
+      uses: innocarpe/actions-slack@v1
+      with:
+        status: ${{ job.status }} # Required
+        success_text: '@${{ github.actor }} just started the workflow for `${{ github.ref }}`'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }} # Required
+
+    - uses: actions/checkout@master
+
+    - name: Set up Python 3.7
+      uses: actions/setup-python@v1
+      with:
+        python-version: 3.7
+
+    - name: Run Tests
+      run: make test_setup test
+
+    - name: Install Build dependencies
+      run: make install_dependancies
+
+    - name: Build With setup.py
+      run: make build
+
+    - name: Publish distribution to Test PyPI
+      if: startsWith(github.ref, 'refs/heads/master')
+      # This will fail if release already exists, should we use  --skip-existing
+      run: make publish_pypi_test
+      env:
+        PYPI_USER: __token__
+        PYPI_PASSWORD: ${{ secrets.pypitoken_test }}
+# TODO: How to notify if the publish happens?
+#      if: success()
+#      uses: innocarpe/actions-slack@v1
+#      with:
+#        status: ${{ job.status }} # Required
+#        success_text: '@${{ github.actor }} Released to PyPi `${{ github.ref }}`'
+#      env:
+#        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required
+#        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }} # Required
+
+    - name: Publish distribution to PyPi
+      if: startsWith(github.ref, 'refs/tags')
+      run: make publish_pypi
+      env:
+        PYPI_USER: __token__
+        PYPI_PASSWORD: ${{ secrets.pypitoken }}
+
+    - name: Notify Results
+      if: always()
+      uses: innocarpe/actions-slack@v1
+      with:
+        status: ${{ job.status }} # Required
+        success_text: 'Step Succeeded 🚀' # Optional
+        failure_text: 'Step Failed 😱' # Optional
+        cancelled_text: 'Step Cancelled ⚠️' # Optional
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }} # Required
