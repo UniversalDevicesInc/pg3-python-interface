@@ -19,12 +19,20 @@ pip 9.0.1 from /usr/lib/python3/dist-packages (python 3.5)
 sudo pip install -U pip
 ```
 
+#### Production version
+
 The module is updated in Pypi (Python's package interface Pip) on a regular basis. So simply install the module like you would any Python module:
 
 ```
 # Install the Polyglot interface
-pip install polyinterface --user
+pip install polyinterface-v3 --user
 ```
+
+#### Development version
+
+The module is also released to Test PyPi, this is the last master branch which may not be released.
+
+`pip install --extra-index-url https://test.pypi.org/simple polyinterface-v3 --user`
 
 ### Starting your NodeServer build
 
