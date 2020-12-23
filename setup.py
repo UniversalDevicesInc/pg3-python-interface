@@ -5,7 +5,7 @@ import re
 with open("polyinterface/__init__.py") as meta_file:
     metadata = dict(re.findall("__([a-z]+)__\s*=\s*'([^']+)'", meta_file.read()))
 
-setup(name='polyinterface',
+setup(name='polyinterface-v3',
     version=metadata['version'],
     description=metadata['description'],
     url=metadata['url'],
@@ -27,7 +27,7 @@ setup(name='polyinterface',
         #   3 - Alpha
         #   4 - Beta
         #   5 - Production/Stable
-        'Development Status :: 5 - Production/Stable',
+        'Development Status :: 3 - Alpha',
 
         # Pick your license as you wish (should match "license" above)
         'License :: OSI Approved :: MIT License',
