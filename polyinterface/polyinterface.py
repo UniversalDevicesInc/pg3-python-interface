@@ -190,6 +190,7 @@ class Interface(object):
         Interface.__exists = True
         self.custom_params_docs_file_sent = False
         self.custom_params_pending_docs = ''
+        self.currentLogLevel = ''
         try:
             self.network_interface = self.get_network_interface()
             LOGGER.info('Connect: Network Interface: {}'.format(
@@ -257,7 +258,8 @@ class Interface(object):
         """
         try:
             inputCmds = ['query', 'command', 'addnode',
-                         'status', 'shortPoll', 'longPoll', 'delete']
+                         'status', 'shortPoll', 'longPoll', 'delete',
+                         'setLogLevel']
             parsed_msg = json.loads(msg.payload.decode('utf-8'))
             if DEBUG:
                 LOGGER.debug('MQTT Received Message: {}: {}'.format(
@@ -272,6 +274,12 @@ class Interface(object):
                     LOGGER.debug(
                         'Received stop from Polyglot... Shutting Down.')
                     self.stop()
+                elif key == 'setLogLevel':
+                    try:
+                        LOGGER.setLevel(parsed_msg[key]['level'].upper())
+                        self.currentLogLevel = parsed_msg[key]['level'].upper()
+                    except (KeyError, ValueError) as err:
+                        LOGGER.error('handleInput: {}'.format(err), exc_info=True)
                 elif key == 'set':
                     if isinstance(parsed_msg[key], list):
                         for item in parsed_msg[key]:
@@ -528,6 +536,11 @@ class Interface(object):
         """
         self.config = config
         # self.isyVersion = config['isyVersion']
+
+        """ is log level in here? """
+        if 'logLevel' in config:
+            self.currentLogLevel = config['logLevel']
+
         try:
             for watcher in self.__configObservers:
                 watcher(config)
@@ -542,6 +555,16 @@ class Interface(object):
 
     def supports_feature(self, feature):
         return True
+
+    def getLogLevel(self):
+        return self.currentLogLevel
+
+    def setLogLevel(self, newLevel):
+        LOGGER.info('Setting log level to {}'.format(newLevel))
+        message = {
+            'setLogLevel': { 'level': newLevel.upper() }
+        }
+        self.send(message, 'system')
 
     def get_md_file_data(self, fileName):
         data = ''
